@@ -104,6 +104,40 @@ def search_places(query: str, limit: int = 6) -> list[dict]:
     return places
 
 
+def reverse_geocode(lat: float, lon: float) -> dict | None:
+    """The nearest address to a point, labelled like a search result, or None in open country or water.
+
+    The coordinates returned are the ones asked for, so a pin dropped on a yard stays where it was put.
+    """
+    params = {"key": _key(), "language": "en-US", "radius": 2000}
+    url = f"{BASE_URL}/search/2/reverseGeocode/{lat:.6f},{lon:.6f}.json"
+    try:
+        resp = session().get(url, params=params, timeout=TIMEOUT_S)
+    except requests.RequestException as exc:
+        raise TomTomError("Place lookup is unreachable. Try again in a moment.") from exc
+    if resp.status_code != 200:
+        logger.warning("TomTom reverse geocode %s: %s", resp.status_code, resp.text[:300])
+        raise TomTomError("Place lookup failed. Try again in a moment.")
+
+    for item in resp.json().get("addresses", []):
+        addr = item.get("address") or {}
+        town = (
+            addr.get("municipality")
+            or addr.get("municipalitySubdivision")
+            or addr.get("countrySecondarySubdivision")
+        )
+        state = addr.get("countrySubdivisionCode") or addr.get("countrySubdivision")
+        street = addr.get("streetNameAndNumber") or addr.get("street") or addr.get("streetName")
+        place = ", ".join(p for p in (town, state) if p)
+        label = street or place or addr.get("freeformAddress") or ""
+        if not label:
+            continue
+        detail_parts = [place if street else None, addr.get("country")]
+        detail = ", ".join(p for p in detail_parts if p)
+        return {"label": label, "detail": detail, "lat": lat, "lon": lon}
+    return None
+
+
 def calculate_routes(
     locations: list[LatLon],
     depart_at: datetime,

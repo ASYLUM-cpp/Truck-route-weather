@@ -3,6 +3,7 @@ import { formatDateTime, formatTime } from '../lib/format';
 import { HEAT_VARIABLE_LABEL, SCALE_VARIABLES, rgba, scaleColor } from '../lib/heatmap';
 import { LEVELS, LEVEL_COLOR, LEVEL_LABEL } from '../lib/risk';
 import type { HeatVariable } from '../types';
+import { InfoTip } from './InfoTip';
 import { Segmented } from './Segmented';
 
 interface Props {
@@ -53,6 +54,11 @@ export function WeatherBar(props: Props) {
           <span className="switch-track" aria-hidden="true" />
           <span className="switch-label">Forecast</span>
         </label>
+        <InfoTip topic="the corridor forecast" placement="top">
+          Weather across the whole trip area for the 48 hours after departure. Drag the slider or press play to move
+          through time, and choose overall risk, wind, rain or snow. The blue dot shows where the selected route&rsquo;s
+          truck would be at that hour. Ticks on the scale mark the risk thresholds.
+        </InfoTip>
 
         <Segmented
           label="Forecast layer"
@@ -114,7 +120,7 @@ export function WeatherBar(props: Props) {
             props.onPlayingChange(false);
             props.onHourChange(Number(e.target.value));
           }}
-          style={{ '--fill': `${(hour / maxHour) * 100}%` } as React.CSSProperties}
+          style={{ '--fill': `${maxHour > 0 ? (hour / maxHour) * 100 : 0}%` } as React.CSSProperties}
         />
         <span className="weather-clock">
           <span className="weather-clock-time">{props.frameTime ? formatTime(props.frameTime) : 'Departure'}</span>

@@ -8,12 +8,16 @@ interface Props {
   onChange: (place: Place | null) => void;
   placeholder?: string;
   error?: string;
+  /** The map is waiting for a click to set this field. */
+  picking: boolean;
+  onPickToggle: () => void;
+  onFocusField: () => void;
 }
 
 const MIN_CHARS = 3;
 const DEBOUNCE_MS = 220;
 
-export function PlaceInput({ label, value, onChange, placeholder, error }: Props) {
+export function PlaceInput({ label, value, onChange, placeholder, error, picking, onPickToggle, onFocusField }: Props) {
   const id = useId();
   const listId = `${id}-list`;
   const [text, setText] = useState(value?.label ?? '');
@@ -95,14 +99,14 @@ export function PlaceInput({ label, value, onChange, placeholder, error }: Props
   const showList = open && (results.length > 0 || status === 'empty' || status === 'error');
 
   return (
-    <div className="field">
+    <div className="field" data-place-field>
       <label htmlFor={id} className="field-label">
         {label}
       </label>
       <div className="combo">
         <input
           id={id}
-          className={`input${error ? ' input-invalid' : ''}`}
+          className={`input input-with-pick${error ? ' input-invalid' : ''}${picking ? ' input-picking' : ''}`}
           type="text"
           role="combobox"
           aria-expanded={showList}
@@ -113,7 +117,7 @@ export function PlaceInput({ label, value, onChange, placeholder, error }: Props
           aria-describedby={error ? `${id}-error` : undefined}
           autoComplete="off"
           spellCheck={false}
-          placeholder={placeholder}
+          placeholder={picking ? 'Click the map, or type a place' : placeholder}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -127,6 +131,7 @@ export function PlaceInput({ label, value, onChange, placeholder, error }: Props
           onFocus={() => {
             window.clearTimeout(blurTimer.current);
             if (results.length) setOpen(true);
+            onFocusField();
           }}
           // Closing is delayed so a tap on a suggestion lands before the list disappears on touch screens.
           onBlur={() => {
@@ -135,6 +140,28 @@ export function PlaceInput({ label, value, onChange, placeholder, error }: Props
           onKeyDown={onKeyDown}
         />
         {status === 'loading' && <span className="combo-spinner" aria-hidden="true" />}
+        <button
+          type="button"
+          className={`combo-pick${picking ? ' is-active' : ''}`}
+          aria-label={`Choose ${label} on the map`}
+          aria-pressed={picking}
+          title={picking ? 'Click the map to place it. Press Esc to cancel.' : `Choose ${label} on the map`}
+          onClick={() => {
+            setOpen(false);
+            onPickToggle();
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+            <path
+              d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
         {showList && (
           <ul id={listId} role="listbox" className="combo-list">
             {results.map((place, i) => (

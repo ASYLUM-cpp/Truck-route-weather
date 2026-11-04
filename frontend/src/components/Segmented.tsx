@@ -11,7 +11,7 @@ interface Props<T extends string> {
   options: Option<T>[];
   value: T;
   onChange: (value: T) => void;
-  size?: 'regular' | 'small';
+  size?: 'regular' | 'small' | 'inline';
   hideLabel?: boolean;
 }
 

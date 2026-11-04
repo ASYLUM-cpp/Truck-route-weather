@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MapView, type MapFocus } from './components/MapView';
+import { MapView, type MapFocus, type MapPick, type PickSource } from './components/MapView';
 import { ResultsSkeleton, RouteResults } from './components/RouteResults';
 import { RouteLegend } from './components/RouteLegend';
-import { TripForm, type TripFormErrors, type TripFormValues } from './components/TripForm';
+import { TripForm, type PlaceField, type TripFormErrors, type TripFormValues } from './components/TripForm';
 import { WeatherBar } from './components/WeatherBar';
 import { ApiError, api } from './lib/api';
 import { formatInt, formatTime, nextFullHour, toLocalInputValue } from './lib/format';
 import { positionAt, thin } from './lib/geo';
 import { renderFrames } from './lib/heatmap';
-import type { AppConfig, Checkpoint, HeatVariable, HeatmapResponse, Interval, PlanResponse } from './types';
+import { MAP_STYLE_IDS, type MapStyleId } from './lib/mapStyles';
+import { readPref, writePref } from './lib/prefs';
+import { formatWeight, fromLb, maxInUnit, toLb, type WeightUnit } from './lib/units';
+import type {
+  AppConfig,
+  Checkpoint,
+  HeatVariable,
+  HeatmapResponse,
+  Interval,
+  LngLat,
+  PlanResponse,
+  Place,
+} from './types';
 
 const ALL_INTERVALS: Interval[] = ['10', '25', '50'];
 
@@ -21,21 +33,59 @@ function effectiveInterval(chosen: Interval, plan: PlanResponse | null): Interva
 const DEFAULT_CONFIG: AppConfig = { truck_tare_lb: 35000, max_load_lb: 80000, max_departure_days: 7 };
 const DEPARTURE_GRACE_MS = 10 * 60 * 1000;
 const SLOW_REQUEST_MS = 6000;
+const MIN_TRIP_MI = 1;
+const NARROW_QUERY = '(max-width: 900px)';
 
-const EXAMPLE_TRIP: Omit<TripFormValues, 'departure'> = {
+const EXAMPLE_TRIP = {
   origin: { label: 'Denver, CO', detail: 'Colorado, United States', lat: 39.7392, lon: -104.9903 },
   destination: { label: 'Salt Lake City, UT', detail: 'Utah, United States', lat: 40.7608, lon: -111.891 },
-  load: formatInt(42000),
+  loadLb: 42000,
 };
 
+/** The typed cargo weight as a number in the unit it was typed in. */
 function parseLoad(text: string): number {
   return Number(text.replace(/[^\d]/g, ''));
 }
 
-function validate(values: TripFormValues, config: AppConfig): TripFormErrors {
+function loadInLb(values: TripFormValues, unit: WeightUnit): number {
+  return Math.round(toLb(parseLoad(values.load), unit));
+}
+
+function distanceMi(a: Place, b: Place): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 3958.8 * Math.asin(Math.sqrt(h));
+}
+
+/** A place for a point picked on the map, named by its coordinates until the address lookup answers. */
+function pinnedPlace([lon, lat]: LngLat): Place {
+  return { label: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, detail: 'Point on the map', lat, lon };
+}
+
+interface PlannedTrip {
+  origin: Place;
+  destination: Place;
+  departure: string;
+  loadLb: number;
+}
+
+/** Whether the form still describes the trip whose results are on screen. */
+function sameTrip(trip: PlannedTrip, values: TripFormValues, unit: WeightUnit): boolean {
+  const samePlace = (a: Place | null, b: Place) => a !== null && a.lat === b.lat && a.lon === b.lon;
+  if (!samePlace(values.origin, trip.origin) || !samePlace(values.destination, trip.destination)) return false;
+  if (!values.departure || new Date(values.departure).toISOString() !== trip.departure) return false;
+  // Switching lb and kg rounds the typed value, so allow for a pound or two of rounding.
+  return Math.abs(loadInLb(values, unit) - trip.loadLb) <= 2.5;
+}
+
+function validate(values: TripFormValues, config: AppConfig, unit: WeightUnit): TripFormErrors {
   const errors: TripFormErrors = {};
-  if (!values.origin) errors.origin = 'Choose a starting point from the suggestions.';
-  if (!values.destination) errors.destination = 'Choose a destination from the suggestions.';
+  if (!values.origin) errors.origin = 'Choose a starting point from the suggestions or the map.';
+  if (!values.destination) errors.destination = 'Choose a destination from the suggestions or the map.';
+  if (values.origin && values.destination && distanceMi(values.origin, values.destination) < MIN_TRIP_MI)
+    errors.destination = 'From and To are the same place. Choose a destination at least 1 mile away.';
   if (!values.departure) {
     errors.departure = 'Enter a departure time.';
   } else {
@@ -44,9 +94,9 @@ function validate(values: TripFormValues, config: AppConfig): TripFormErrors {
     else if (t > Date.now() + config.max_departure_days * 864e5)
       errors.departure = `Choose a time within the next ${config.max_departure_days} days.`;
   }
-  if (!values.load) errors.load = 'Enter the cargo weight.';
-  else if (parseLoad(values.load) > config.max_load_lb)
-    errors.load = `Cargo weight cannot exceed ${formatInt(config.max_load_lb)} lb.`;
+  if (!values.load) errors.load = 'Enter the cargo weight. Use 0 for an empty trailer.';
+  else if (parseLoad(values.load) > maxInUnit(config.max_load_lb, unit))
+    errors.load = `Cargo weight cannot exceed ${formatInt(maxInUnit(config.max_load_lb, unit))} ${unit}.`;
   return errors;
 }
 
@@ -70,11 +120,19 @@ export function App() {
     load: '',
   }));
   const [errors, setErrors] = useState<TripFormErrors>({});
+  const [loadUnit, setLoadUnit] = useState<WeightUnit>(() => readPref('loadUnit', ['lb', 'kg'], 'lb'));
+  const [mapStyle, setMapStyle] = useState<MapStyleId>(() => readPref('mapStyle', MAP_STYLE_IDS, 'light'));
+  const [pick, setPick] = useState<MapPick | null>(null);
+  const valuesRef = useRef(values);
+  useEffect(() => {
+    valuesRef.current = values;
+  }, [values]);
   const [interval, setIntervalMi] = useState<Interval>('25');
   // Read when a plan arrives, so a spacing change made during the request is respected.
   const intervalRef = useRef(interval);
 
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [plannedTrip, setPlannedTrip] = useState<PlannedTrip | null>(null);
   const [planStatus, setPlanStatus] = useState<'idle' | 'loading'>('idle');
   const [planError, setPlanError] = useState<string | null>(null);
   const [planSlow, setPlanSlow] = useState(false);
@@ -111,6 +169,95 @@ export function App() {
     });
   }, []);
 
+  /** Form edits; choosing a place for the field the map was waiting on ends the map pick. */
+  const changeFromForm = useCallback(
+    (patch: Partial<TripFormValues>) => {
+      updateValues(patch);
+      setPick((p) => (p && patch[p.field] ? null : p));
+    },
+    [updateValues],
+  );
+
+  const changeLoadUnit = useCallback(
+    (unit: WeightUnit) => {
+      if (unit === loadUnit) return;
+      // Convert what was typed so the weight stays the same.
+      setValues((v) => (v.load ? { ...v, load: formatInt(fromLb(toLb(parseLoad(v.load), loadUnit), unit)) } : v));
+      setErrors((e) => {
+        const next = { ...e };
+        delete next.load;
+        return next;
+      });
+      setLoadUnit(unit);
+      writePref('loadUnit', unit);
+    },
+    [loadUnit],
+  );
+
+  const changeMapStyle = useCallback((id: MapStyleId) => {
+    setMapStyle(id);
+    writePref('mapStyle', id);
+  }, []);
+
+  const togglePick = useCallback((field: PlaceField) => {
+    setPick((p) => (p?.explicit && p.field === field ? null : { field, explicit: true }));
+    // On small screens the map is above the form; bring it into view to pick.
+    if (window.matchMedia(NARROW_QUERY).matches) {
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      document.querySelector('.map-area')?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }
+  }, []);
+
+  const focusPlace = useCallback((field: PlaceField) => {
+    setPick((p) => (p?.field === field ? p : { field, explicit: false }));
+  }, []);
+
+  const placePicked = useCallback(
+    (field: PlaceField, lngLat: LngLat, source: PickSource) => {
+      const place = pinnedPlace(lngLat);
+      updateValues(field === 'origin' ? { origin: place } : { destination: place });
+      if (source === 'pick') {
+        // Move on to the other field when it is still empty, so two picks set a whole trip.
+        const other: PlaceField = field === 'origin' ? 'destination' : 'origin';
+        const next = valuesRef.current[other] ? null : other;
+        setPick((p) => (next && p ? { field: next, explicit: p.explicit } : null));
+        if (!next && window.matchMedia(NARROW_QUERY).matches) {
+          document.querySelector('.trip-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+      api
+        .reverse(place.lat, place.lon)
+        .then((found) => {
+          if (!found) return;
+          // Keep the pin where it was dropped, and ignore answers for a pin that has since moved.
+          setValues((v) => {
+            const current = v[field];
+            if (!current || current.lat !== place.lat || current.lon !== place.lon) return v;
+            return { ...v, [field]: { ...found, lat: place.lat, lon: place.lon } };
+          });
+        })
+        .catch(() => undefined);
+    },
+    [updateValues],
+  );
+
+  // A map pick ends with Escape or when focus moves to another control in the panel.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest('.panel') && !target.closest('[data-place-field]')) setPick(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPick(null);
+    };
+    document.addEventListener('focusin', onFocusIn);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
   const loadHeatmap = useCallback((p: PlanResponse) => {
     heatAbort.current?.abort();
     const controller = new AbortController();
@@ -134,9 +281,17 @@ export function App() {
   }, []);
 
   const submit = useCallback(async () => {
-    const found = validate(values, config);
+    const found = validate(values, config, loadUnit);
     setErrors(found);
+    setPick(null);
     if (Object.keys(found).length) return;
+
+    const trip: PlannedTrip = {
+      origin: values.origin!,
+      destination: values.destination!,
+      departure: new Date(values.departure).toISOString(),
+      loadLb: loadInLb(values, loadUnit),
+    };
 
     heatAbort.current?.abort();
     setPlan(null);
@@ -148,17 +303,18 @@ export function App() {
     const slowTimer = window.setTimeout(() => setPlanSlow(true), SLOW_REQUEST_MS);
     try {
       const result = await api.plan({
-        origin: { lat: values.origin!.lat, lon: values.origin!.lon },
-        destination: { lat: values.destination!.lat, lon: values.destination!.lon },
-        departure: new Date(values.departure).toISOString(),
-        load_lb: parseLoad(values.load),
+        origin: { lat: trip.origin.lat, lon: trip.origin.lon },
+        destination: { lat: trip.destination.lat, lon: trip.destination.lon },
+        departure: trip.departure,
+        load_lb: trip.loadLb,
       });
       userPickedRoute.current = false;
       setPlan(result);
+      setPlannedTrip(trip);
       setSelectedId(result.recommendations[effectiveInterval(intervalRef.current, result)].route_id);
       loadHeatmap(result);
       // On small screens the map sits above the form; bring it back into view to show the routes.
-      if (window.matchMedia('(max-width: 900px)').matches) {
+      if (window.matchMedia(NARROW_QUERY).matches) {
         const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         mapAreaRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
       }
@@ -175,7 +331,7 @@ export function App() {
       window.clearTimeout(slowTimer);
       setPlanStatus('idle');
     }
-  }, [values, config, loadHeatmap]);
+  }, [values, config, loadUnit, loadHeatmap]);
 
   const changeInterval = useCallback(
     (next: Interval) => {
@@ -199,7 +355,13 @@ export function App() {
   );
 
   function loadExample() {
-    updateValues({ ...EXAMPLE_TRIP, departure: toLocalInputValue(nextFullHour()) });
+    setPick(null);
+    updateValues({
+      origin: EXAMPLE_TRIP.origin,
+      destination: EXAMPLE_TRIP.destination,
+      load: formatInt(fromLb(EXAMPLE_TRIP.loadLb, loadUnit)),
+      departure: toLocalInputValue(nextFullHour()),
+    });
   }
 
   // Forecast frames are rendered once per data set and layer, so moving the slider only swaps an image.
@@ -223,6 +385,11 @@ export function App() {
     else note = `${selectedRoute.label} is near mile ${Math.round(mile)}`;
     return { lngLat, note };
   }, [plan, selectedRoute, frameTime, heatStatus]);
+
+  const stale = Boolean(plan && plannedTrip && !sameTrip(plannedTrip, values, loadUnit));
+  // Only a field that is empty, or whose map button is on, takes a place from a right-click.
+  const activePick = pick && (pick.explicit || !values[pick.field]) ? pick : null;
+  const cargoText = plan ? formatWeight(plan.load_lb, loadUnit) : '';
 
   const now = new Date();
   const minDeparture = toLocalInputValue(now);
@@ -253,14 +420,20 @@ export function App() {
           <TripForm
             values={values}
             errors={errors}
+            loadUnit={loadUnit}
             interval={shownInterval}
             availableIntervals={plan?.intervals ?? ALL_INTERVALS}
             tareLb={config.truck_tare_lb}
             submitting={planStatus === 'loading'}
+            stale={stale}
             minDeparture={minDeparture}
             maxDeparture={maxDeparture}
-            onChange={updateValues}
+            pickField={pick?.explicit ? pick.field : null}
+            onChange={changeFromForm}
+            onLoadUnitChange={changeLoadUnit}
             onIntervalChange={changeInterval}
+            onPickToggle={togglePick}
+            onFocusPlace={focusPlace}
             onSubmit={submit}
           />
 
@@ -280,19 +453,30 @@ export function App() {
               <ResultsSkeleton />
             </>
           ) : plan && selectedId ? (
-            <RouteResults
-              plan={plan}
-              interval={shownInterval}
-              selectedId={selectedId}
-              onSelect={selectRoute}
-              onFocusCheckpoint={focusCheckpoint}
-            />
+            <>
+              {stale && (
+                <p className="notice notice-stale" role="status">
+                  The trip details have changed. Press Update routes to see results for them.
+                </p>
+              )}
+              <RouteResults
+                plan={plan}
+                interval={shownInterval}
+                selectedId={selectedId}
+                onSelect={selectRoute}
+                onFocusCheckpoint={focusCheckpoint}
+              />
+            </>
           ) : (
             !planError && (
               <div className="empty">
                 <p>
                   Compare three truck routes by the weather each one meets. The forecast is checked at every checkpoint
                   for the hour the truck reaches it.
+                </p>
+                <p className="empty-tip">
+                  You can also choose From and To on the map: press the target button in either field, or right-click
+                  the map. Drag a pin to adjust it.
                 </p>
                 <button type="button" className="link-button" onClick={loadExample}>
                   Fill in an example trip: Denver to Salt Lake City
@@ -325,8 +509,16 @@ export function App() {
           heatVisible={heatVisible}
           truck={truck?.lngLat ?? null}
           focus={focus}
+          cargoText={cargoText}
+          origin={values.origin}
+          destination={values.destination}
+          pick={activePick}
+          onPlacePicked={placePicked}
+          onCancelPick={() => setPick(null)}
+          mapStyle={mapStyle}
+          onMapStyleChange={changeMapStyle}
         />
-        <RouteLegend />
+        <RouteLegend showEndpoints={Boolean(values.origin || values.destination)} />
         {plan && (
           <WeatherBar
             status={heatStatus}

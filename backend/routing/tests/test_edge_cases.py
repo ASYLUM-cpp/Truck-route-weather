@@ -377,3 +377,83 @@ class PlaceSearchTests(SimpleTestCase):
     def test_upstream_failure(self):
         with self.assertRaises(tomtom.TomTomError):
             self.search(FakeResponse(500, {}))
+
+
+@override_settings(TOMTOM_API_KEY="test")
+class ReverseGeocodeTests(SimpleTestCase):
+    def lookup(self, response, lat=41.79, lon=-107.24):
+        session = mock.Mock()
+        session.get.return_value = response
+        with mock.patch("routing.services.tomtom.session", return_value=session):
+            return tomtom.reverse_geocode(lat, lon), session.get.call_args
+
+    def test_street_address_with_town_as_detail(self):
+        payload = {
+            "addresses": [
+                {
+                    "address": {
+                        "streetNameAndNumber": "1200 W Spruce St",
+                        "municipality": "Rawlins",
+                        "countrySubdivisionCode": "WY",
+                        "country": "United States",
+                    }
+                }
+            ]
+        }
+        place, call = self.lookup(FakeResponse(200, payload))
+        self.assertEqual(place["label"], "1200 W Spruce St")
+        self.assertEqual(place["detail"], "Rawlins, WY, United States")
+        # The pin stays where it was dropped, not on the matched address.
+        self.assertEqual((place["lat"], place["lon"]), (41.79, -107.24))
+        self.assertIn("41.790000,-107.240000", call.args[0])
+
+    def test_open_country_falls_back_to_town(self):
+        payload = {
+            "addresses": [
+                {"address": {"countrySecondarySubdivision": "Carbon", "countrySubdivision": "Wyoming"}}
+            ]
+        }
+        place, _ = self.lookup(FakeResponse(200, payload))
+        self.assertEqual(place["label"], "Carbon, Wyoming")
+        self.assertEqual(place["detail"], "")
+
+    def test_no_address_returns_none(self):
+        place, _ = self.lookup(FakeResponse(200, {"addresses": [{"address": {}}]}))
+        self.assertIsNone(place)
+        place, _ = self.lookup(FakeResponse(200, {"addresses": []}))
+        self.assertIsNone(place)
+
+    def test_upstream_failure(self):
+        with self.assertRaises(tomtom.TomTomError):
+            self.lookup(FakeResponse(503, {}))
+
+    def test_unreachable(self):
+        session = mock.Mock()
+        session.get.side_effect = tomtom.requests.ConnectionError("down")
+        with (
+            mock.patch("routing.services.tomtom.session", return_value=session),
+            self.assertRaises(tomtom.TomTomError),
+        ):
+            tomtom.reverse_geocode(1, 2)
+
+
+class ReverseGeocodeEndpointTests(SimpleTestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @mock.patch("routing.services.tomtom.reverse_geocode", return_value={"label": "Rawlins, WY"})
+    def test_returns_place(self, lookup):
+        resp = self.client.get("/api/reverse", {"lat": "41.79", "lon": "-107.24"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"result": {"label": "Rawlins, WY"}})
+        lookup.assert_called_once_with(41.79, -107.24)
+
+    @mock.patch("routing.services.tomtom.reverse_geocode", return_value=None)
+    def test_nothing_nearby_is_null_not_an_error(self, _lookup):
+        resp = self.client.get("/api/reverse", {"lat": "30", "lon": "-140"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.json()["result"])
+
+    def test_rejects_bad_coordinates(self):
+        self.assertEqual(self.client.get("/api/reverse", {"lat": "91", "lon": "0"}).status_code, 400)
+        self.assertEqual(self.client.get("/api/reverse", {"lat": "abc"}).status_code, 400)

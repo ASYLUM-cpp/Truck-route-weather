@@ -67,6 +67,9 @@ export const api = {
   places: (q: string, signal: AbortSignal) =>
     request<{ results: Place[] }>(`/api/places?q=${encodeURIComponent(q)}`, { signal }).then((r) => r.results),
 
+  reverse: (lat: number, lon: number) =>
+    request<{ result: Place | null }>(`/api/reverse?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`).then((r) => r.result),
+
   plan: (body: PlanRequest) => request<PlanResponse>('/api/plan', { method: 'POST', body: JSON.stringify(body) }),
 
   heatmap: (body: { paths: LngLat[][]; departure: string; load_lb: number }, signal: AbortSignal) =>

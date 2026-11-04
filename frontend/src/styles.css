@@ -64,8 +64,12 @@ input {
   position: absolute;
   width: 1px;
   height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -107,6 +111,9 @@ input {
 }
 
 .panel-body {
+  /* Positioned so absolutely placed content (hidden labels, tooltips) scrolls with the panel and never
+     stretches the page below the window. */
+  position: relative;
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px 28px;
@@ -168,9 +175,14 @@ input {
   cursor: pointer;
 }
 
-.swap:hover {
+.swap:hover:not(:disabled) {
   border-color: var(--line-strong);
   color: var(--ink);
+}
+
+.swap:disabled {
+  color: var(--line-strong);
+  cursor: default;
 }
 
 .field-row {
@@ -277,7 +289,7 @@ input {
 .combo-spinner {
   position: absolute;
   top: 50%;
-  right: 12px;
+  right: 44px;
   width: 14px;
   height: 14px;
   margin-top: -7px;
@@ -637,6 +649,7 @@ input {
 }
 
 .risk-strip {
+  position: relative;
   display: flex;
   height: 8px;
   overflow: hidden;
@@ -861,10 +874,10 @@ input {
   height: 18px;
   border: 3px solid #fff;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--accent);
   box-shadow:
-    0 0 0 1px rgba(24, 34, 47, 0.35),
-    0 2px 6px rgba(24, 34, 47, 0.3);
+    0 0 0 4px rgba(31, 92, 153, 0.28),
+    0 2px 6px rgba(24, 34, 47, 0.35);
   pointer-events: none;
 }
 
@@ -1165,6 +1178,9 @@ input {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .map-hint {
+    animation: none;
+  }
   .skeleton {
     animation: none;
   }
@@ -1176,6 +1192,14 @@ input {
   .switch-track,
   .switch-track::after {
     transition: none;
+  }
+}
+
+/* On wide screens the app is exactly one window tall and never scrolls as a page. */
+@media (min-width: 901px) {
+  html,
+  body {
+    overflow: hidden;
   }
 }
 
@@ -1276,12 +1300,7 @@ input {
 }
 
 .map-notice {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  max-width: calc(100% - 140px);
   padding: 6px 12px;
-  transform: translateX(-50%);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   background: var(--panel);
@@ -1302,4 +1321,384 @@ input {
   color: var(--ink-3);
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* Help tooltips --------------------------------------------------------- */
+
+.field-label-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.field-label-row .field-label {
+  margin-bottom: 0;
+}
+
+.infotip-button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-3);
+  cursor: help;
+}
+
+.infotip-button:hover,
+.infotip-button.is-open {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.infotip-bubble {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-width: 380px;
+  padding: 10px 12px;
+  border-radius: var(--radius-l);
+  background: var(--ink);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  box-shadow: var(--shadow-float);
+}
+
+.infotip-bubble[hidden] {
+  display: none;
+}
+
+.infotip-bottom {
+  top: calc(100% + 6px);
+}
+
+.infotip-top {
+  bottom: calc(100% + 8px);
+}
+
+/* Place inputs: map button, picking state */
+
+.input-with-pick {
+  padding-right: 42px;
+}
+
+.input-picking {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input-picking::placeholder {
+  color: var(--accent);
+}
+
+.combo-pick {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.combo-pick:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.combo-pick.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Cargo weight unit switch inside the input */
+
+.affix-toggle {
+  padding: 0 4px;
+}
+
+.segmented-inline {
+  padding: 2px;
+  border: 0;
+  background: transparent;
+}
+
+.segmented-inline .segmented-option {
+  padding: 3px 8px 2px;
+  font-size: 12px;
+}
+
+.segmented-inline .segmented-option.is-checked {
+  background: var(--panel);
+}
+
+.notice-stale {
+  margin-top: 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-m);
+  background: var(--accent-soft);
+  color: var(--ink-2);
+}
+
+.notice-stale + .results {
+  margin-top: 14px;
+}
+
+.empty-tip {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* Map: picking places --------------------------------------------------- */
+
+.map.is-picking .maplibregl-canvas-container.maplibregl-interactive,
+.map.is-picking .maplibregl-canvas {
+  cursor: crosshair;
+}
+
+.map-top {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: calc(100% - 330px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.map-hint {
+  pointer-events: auto;
+}
+
+.map-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px 7px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow-float);
+  animation: hint-in 160ms ease-out;
+}
+
+.map-hint:not(:has(button)) {
+  padding-right: 14px;
+}
+
+.map-hint-cancel {
+  padding: 3px 10px 2px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.map-hint-cancel:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.map-menu {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  width: 184px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--panel);
+  box-shadow: var(--shadow-float);
+}
+
+.map-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.map-menu-item:hover,
+.map-menu-item:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+/* From and To pins. From is hollow, To is filled, matching the legend and the menu. */
+
+.endpoint-pin {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: 0 1px 5px rgba(24, 34, 47, 0.4);
+  cursor: grab;
+}
+
+.endpoint-pin:active {
+  cursor: grabbing;
+}
+
+.endpoint-origin {
+  border: 4px solid var(--ink);
+  background: #fff;
+}
+
+.endpoint-destination {
+  border: 3px solid #fff;
+  background: var(--ink);
+  box-shadow:
+    0 0 0 1px rgba(24, 34, 47, 0.5),
+    0 1px 5px rgba(24, 34, 47, 0.4);
+}
+
+.menu-pin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.menu-pin.endpoint-origin {
+  border-width: 3px;
+}
+
+.menu-pin.endpoint-destination {
+  border-width: 2px;
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.map-legend-endpoints {
+  margin-top: 8px !important;
+  padding-top: 8px !important;
+  border-top: 1px solid var(--line);
+}
+
+/* Map type */
+
+.map-style {
+  position: absolute;
+  top: 79px;
+  right: 10px;
+}
+
+.map-style-button {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: #fff;
+  color: #333;
+  box-shadow: 0 1px 4px rgba(24, 34, 47, 0.18);
+  cursor: pointer;
+}
+
+.map-style-button:hover,
+.map-style-button.is-open {
+  background: #f2f2f2;
+}
+
+.map-style-menu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  display: grid;
+  gap: 2px;
+  width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--panel);
+  box-shadow: var(--shadow-float);
+}
+
+.map-style-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.map-style-option:hover {
+  background: var(--surface);
+}
+
+.map-style-option.is-checked {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.map-style-preview {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-s);
+  box-shadow: inset 0 0 0 1px rgba(24, 34, 47, 0.15);
+}
+
+.map-style-option.is-checked .map-style-preview {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* The hint sits between the legend and the zoom controls on wide maps, and uses the width on narrow ones. */
+@media (max-width: 900px) {
+  .map-top {
+    max-width: calc(100% - 300px);
+  }
+}
+
+@media (max-width: 600px) {
+  .map-top {
+    max-width: calc(100% - 100px);
+  }
+
+  .map-hint {
+    white-space: normal;
+    border-radius: var(--radius-l);
+  }
 }

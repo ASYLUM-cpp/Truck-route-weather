@@ -10,14 +10,26 @@ You enter an origin, a destination, a departure time and the cargo weight. The a
 
 ## Using it
 
-1. Type a city or address in **From** and **To** and pick a suggestion.
-2. Set the departure time (your local time zone) and the cargo weight in pounds.
+1. Type a city or address in **From** and **To** and pick a suggestion, or choose them on the map (see below).
+2. Set the departure time (your local time zone) and the cargo weight. The switch inside the weight field changes between pounds and kilograms and converts what you typed; the app remembers your choice.
 3. Choose how often to check the weather: every 10, 25 or 50 miles. You can change this after the results load; nothing is fetched again.
 4. Press **Find routes**.
 
+There are three ways to choose places on the map:
+
+- Press the target button inside **From** or **To**, then click (or tap) the map. After From is set the map moves on to To, so two clicks plan a whole trip. Esc or **Cancel** stops.
+- While you are in an empty From or To field, even mid-typing, right-click the map to fill that field.
+- Right-click anywhere else for a small menu: **Set as From** or **Set as To**.
+
+From and To appear as pins (From hollow, To filled), which can be dragged to adjust them. A picked point is named by the nearest street or town; the pin stays exactly where it was dropped. The small help buttons next to **Cargo weight**, **Weather checkpoints every** and **Forecast** explain what each one does.
+
+If you change the trip after the results load, the panel says so and the button becomes **Update routes**, so results for an old trip are never mistaken for the new one.
+
 The panel shows the recommended route and why it was picked, then the three routes with travel time, distance, arrival time and a strip showing risk mile by mile. Selecting a route highlights it on the map. The checkpoint table lists mile, ETA, wind, rain, snow and risk for the selected route; clicking a row moves the map to that checkpoint.
 
-On the map, routes are coloured by risk and checkpoint dots show the forecast on hover. The forecast bar at the bottom shows the weather across the whole trip corridor. Drag the slider (or press play) to move through the 48 hours after departure, and switch between overall risk, wind, rain and snow. A dark dot marks where the truck on the selected route would be at that hour.
+On the map, routes are coloured by risk and checkpoint dots show the forecast on hover. The forecast bar at the bottom shows the weather across the whole trip corridor. Drag the slider (or press play) to move through the 48 hours after departure, and switch between overall risk, wind, rain and snow. A blue dot marks where the truck on the selected route would be at that hour.
+
+The layers button under the zoom controls switches the base map between **Light**, **Streets** and **Dark**, all from OpenFreeMap. Routes, checkpoints and the forecast layer stay in place when the map changes.
 
 There is a one-click example trip (Denver to Salt Lake City with 42,000 lb), which is a good test of the wind and load rules because I-80 across southern Wyoming is often closed to light, high-sided loads in strong wind.
 
@@ -102,7 +114,7 @@ backend/
       corridor.py         Mercator-aligned corridor grid for the forecast map
       geo.py              Distances, interpolation, simplification, overlap
     services/
-      tomtom.py           Place search and truck routing
+      tomtom.py           Place search, reverse geocoding and truck routing
       weather.py          Open-Meteo client and hourly series
       planner.py          The trip planning use case
       heatmap.py          The corridor forecast use case
@@ -114,7 +126,7 @@ frontend/
   src/
     App.tsx               State and layout
     components/           Form, route cards, map, forecast bar, table
-    lib/                  API client, formatting, risk colours, heatmap frames
+    lib/                  API client, formatting, units, map styles, risk colours, heatmap frames
 .github/                  CI workflow and Dependabot
 render.yaml               Render blueprint for the API
 ```
@@ -160,7 +172,7 @@ cd ../frontend
 npm run lint && npm run format:check && npm run typecheck && npm run build
 ```
 
-The backend has 82 tests at 92% line coverage. They cover every edge of the risk table and load rules, the ranking order, ETA interpolation, the corridor grid, and the failure paths: TomTom rejecting a key, an address too far from a truck road, no route, a past departure, Open-Meteo rate limits, missing forecast hours, duplicate or slow alternative routes, trips shorter than one checkpoint interval, and malformed requests. External APIs are mocked, so the suite runs offline in under a second.
+The backend has 90 tests at 93% line coverage. They cover every edge of the risk table and load rules, the ranking order, ETA interpolation, the corridor grid, reverse geocoding, and the failure paths: TomTom rejecting a key, an address too far from a truck road, no route, a past departure, Open-Meteo rate limits, missing forecast hours, duplicate or slow alternative routes, trips shorter than one checkpoint interval, and malformed requests. External APIs are mocked, so the suite runs offline in under a second.
 
 ESLint runs with the React hooks rules, including the newer ones that flag refs written during render, and fails on any warning. Prettier and Ruff enforce formatting. Dependabot opens weekly update PRs for Python and npm packages and monthly ones for GitHub Actions. Runtime dependencies are pinned to exact versions; Django is on the 5.2 LTS line.
 
@@ -222,7 +234,7 @@ Frontend (set in Vercel):
 | Variable | Purpose |
 |---|---|
 | `VITE_API_BASE_URL` | URL of the API, no trailing slash |
-| `VITE_MAP_STYLE_URL` | Optional MapLibre style; defaults to OpenFreeMap Positron |
+| `VITE_MAP_STYLE_URL` | Optional MapLibre style for the Light map; defaults to OpenFreeMap Positron |
 
 ## API
 
@@ -233,6 +245,7 @@ All endpoints are under `/api`.
 | GET | `/health` | Liveness check |
 | GET | `/config` | Tare weight and input limits used by the form |
 | GET | `/places?q=` | Place suggestions |
+| GET | `/reverse?lat=&lon=` | Name of the nearest street or town, for a point picked on the map; `null` in open country |
 | POST | `/plan` | Routes, checkpoints for all three spacings, risk summaries and recommendations |
 | POST | `/heatmap` | Corridor forecast grid for 0 to 48 hours after departure |
 

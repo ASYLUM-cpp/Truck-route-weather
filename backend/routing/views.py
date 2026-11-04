@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.views import exception_handler as drf_exception_handler
 
-from .serializers import HeatmapRequestSerializer, PlanRequestSerializer
+from .serializers import HeatmapRequestSerializer, PlanRequestSerializer, PointSerializer
 from .services import tomtom, weather
 from .services.heatmap import corridor_heatmap
 from .services.planner import TripRequest, plan_trip
@@ -55,6 +55,16 @@ class PlaceSearchView(APIView):
         if len(query) < 2:
             return Response({"results": []})
         return Response({"results": tomtom.search_places(query[:120])})
+
+
+class ReverseGeocodeView(APIView):
+    throttle_scope = "places"
+
+    def get(self, request):
+        s = PointSerializer(data=request.query_params)
+        s.is_valid(raise_exception=True)
+        place = tomtom.reverse_geocode(s.validated_data["lat"], s.validated_data["lon"])
+        return Response({"result": place})
 
 
 class PlanView(APIView):

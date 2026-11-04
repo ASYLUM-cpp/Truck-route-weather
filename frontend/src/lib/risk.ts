@@ -1,5 +1,4 @@
 import type { Checkpoint, LevelKey } from '../types';
-import { formatInt } from './format';
 
 export const LEVELS: LevelKey[] = ['low', 'moderate', 'high', 'severe', 'no_travel'];
 
@@ -29,14 +28,14 @@ export function levelLabel(level: LevelKey | null): string {
   return level ? LEVEL_LABEL[level] : 'No data';
 }
 
-/** One sentence saying what sets the risk level at a checkpoint. */
-export function explainCheckpoint(cp: Checkpoint, loadLb: number): string {
+/** One sentence saying what sets the risk level at a checkpoint. `cargo` is the load as shown, e.g. "42,000 lb". */
+export function explainCheckpoint(cp: Checkpoint, cargo: string): string {
   if (cp.level === null) return 'No forecast is available for this time.';
   if (cp.level === 'low') return 'All conditions are within normal limits.';
   const parts = cp.drivers.map((d) => {
     if (d === 'wind') {
       const base = `wind ${cp.wind_mph} mph`;
-      return cp.load_rule ? `${base} with ${formatInt(loadLb)} lb of cargo` : base;
+      return cp.load_rule ? `${base} with ${cargo} of cargo` : base;
     }
     if (d === 'rain') return `rain ${cp.rain_in?.toFixed(2)} in/hr`;
     return `snow ${cp.snow_in?.toFixed(2)} in/hr`;
