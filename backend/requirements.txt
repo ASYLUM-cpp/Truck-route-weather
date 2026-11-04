@@ -1,5 +1,5 @@
 # Runtime dependencies, pinned for reproducible builds. Dependabot proposes upgrades.
-Django==5.2.19
+Django==6.1.2
 djangorestframework==3.18.3
 django-cors-headers==4.9.0
 requests==2.34.2
