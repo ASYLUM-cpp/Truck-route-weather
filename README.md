@@ -95,6 +95,23 @@ Items 2 to 5 are the assessment's list. No travel is added in front because a No
 
 The reason shown is the first criterion on which the winner beats the runner-up, for example "No Severe miles. Route C has 100 mi in Severe conditions." Travel time is compared in whole minutes, so two routes a few seconds apart count as equal. If every route crosses No travel conditions, the best one is labelled "Least exposed" rather than "Recommended", and the panel suggests a later departure.
 
+### Proving the rules
+
+`python manage.py prove_rules` runs a scenario that needs no API keys and prints what it finds. TomTom and Open-Meteo are replaced by fixed data; everything else is the real code path, including `plan_trip`, the risk rules and the ranking. It exits non-zero if any of its 30 checks fails, and it also runs in the test suite.
+
+Part 1 puts wind speeds from 24.9 to 55 mph against cargo weights of 28,000, 30,000, 30,001, 40,000 and 40,001 lb, and compares the result with a table written out by hand from the assessment. It also checks the rain and snow edges and the rule that the worst condition wins.
+
+Part 2 plans Denver to Salt Lake City over three routes: Route A meets a front of 38 mph wind between 08:00 and 10:00 UTC, Route B meets rain at 0.30 in/hr, and Route C meets 48 mph wind. The same weather is used for four trips:
+
+1. A 28,000 lb truck is not affected by the load rules, and Route A wins because it has the fewest High miles.
+2. A 42,000 lb truck in the same weather has Route A's 38 mph raised to Severe and Route C's 48 mph raised to No Travel, so the recommendation changes to Route B.
+3. The same heavy truck leaving at 09:00 reaches Route A's front after it has gone, so Route A is clear and is recommended again. This shows that the forecast is read at each checkpoint's arrival time, not at departure.
+4. On a calm day with no High miles anywhere, average risk puts the fastest route last and then travel time decides between the other two, which exercises the last two ranking criteria.
+
+To check that the checks themselves can fail, each of these changes was made to the code in turn, and the scenario failed every time: each load threshold, where each load rule starts, the High and No Travel wind edges, the rain and snow edges, taking the best condition instead of the worst, putting Severe before No Travel in the ranking, ignoring average risk, preferring the slowest route, and sampling the forecast at departure instead of arrival.
+
+`python manage.py scenarios` runs 20 trips on the same routes, with weather placed to make the recommendation change: a slower but safer route, the weight flipping the route at exactly 30,000 and 40,000 lb (and the same flip typed in kilograms), a three-way flip as the load grows, the departure time changing the route, and the tie-breakers. Each prints the recommended route, the Severe, High and No Travel miles per route and the app's reason, and the test suite fails if any trip stops getting its expected route.
+
 ### Corridor forecast map
 
 The backend builds a grid around all three routes, keeping only cells within a set distance of a route (25 to 90 miles depending on trip length) and capped at 200 cells. It fetches 49 hourly values (departure hour to +48 h) for each cell and returns wind, rain, snow and the computed risk level, using the trip's cargo weight.
@@ -172,7 +189,7 @@ cd ../frontend
 npm run lint && npm run format:check && npm run typecheck && npm run build
 ```
 
-The backend has 90 tests at 93% line coverage. They cover every edge of the risk table and load rules, the ranking order, ETA interpolation, the corridor grid, reverse geocoding, and the failure paths: TomTom rejecting a key, an address too far from a truck road, no route, a past departure, Open-Meteo rate limits, missing forecast hours, duplicate or slow alternative routes, trips shorter than one checkpoint interval, and malformed requests. External APIs are mocked, so the suite runs offline in under a second.
+The backend has 92 tests at 94% line coverage. They cover every edge of the risk table and load rules, the ranking order, ETA interpolation, the corridor grid, reverse geocoding, and the failure paths: TomTom rejecting a key, an address too far from a truck road, no route, a past departure, Open-Meteo rate limits, missing forecast hours, duplicate or slow alternative routes, trips shorter than one checkpoint interval, and malformed requests. External APIs are mocked, so the suite runs offline in under a second.
 
 ESLint runs with the React hooks rules, including the newer ones that flag refs written during render, and fails on any warning. Prettier and Ruff enforce formatting. Dependabot opens weekly update PRs for Python and npm packages and monthly ones for GitHub Actions. Runtime dependencies are pinned to exact versions; Django is on the 5.2 LTS line.
 

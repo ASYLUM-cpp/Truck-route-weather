@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -44,9 +45,15 @@ class _PreparedRoute:
     stops: dict[float, tuple[geo.LatLon, datetime]]  # checkpoint mile -> (position, ETA)
 
 
-def plan_trip(req: TripRequest) -> dict:
+def plan_trip(
+    req: TripRequest,
+    *,
+    routes_fn: Callable[..., list[tomtom.RawRoute]] | None = None,
+    weather_fn: Callable[..., list[weather.HourlySeries]] | None = None,
+) -> dict:
+    """Plan a trip. `routes_fn` and `weather_fn` replace TomTom and Open-Meteo for demo scenarios."""
     gross_lb = req.load_lb + settings.TRUCK_TARE_LB
-    raw_routes, notices = _find_routes(req, round(gross_lb * LB_TO_KG))
+    raw_routes, notices = _find_routes(req, round(gross_lb * LB_TO_KG), routes_fn or tomtom.calculate_routes)
     raw_routes.sort(key=lambda r: r.travel_time_s)
     intervals = INTERVALS_MI
     routes = [_prepare(r, chr(ord("A") + i), req.departure, intervals) for i, r in enumerate(raw_routes)]
@@ -59,7 +66,7 @@ def plan_trip(req: TripRequest) -> dict:
             "to stay within the free weather service's limits."
         )
 
-    series_by_loc = _fetch_checkpoint_weather(routes, req.departure)
+    series_by_loc = _fetch_checkpoint_weather(routes, req.departure, weather_fn or weather.fetch_hourly)
 
     route_payloads, scores_by_interval = [], {str(i): [] for i in intervals}
     for route in routes:
@@ -95,8 +102,10 @@ def plan_trip(req: TripRequest) -> dict:
 # Route discovery ---------------------------------------------------------------------------
 
 
-def _find_routes(req: TripRequest, gross_kg: int) -> tuple[list[tomtom.RawRoute], list[str]]:
-    found = tomtom.calculate_routes(
+def _find_routes(
+    req: TripRequest, gross_kg: int, calculate: Callable[..., list[tomtom.RawRoute]]
+) -> tuple[list[tomtom.RawRoute], list[str]]:
+    found = calculate(
         [req.origin, req.destination], req.departure, gross_kg, max_alternatives=TARGET_ROUTES - 1
     )
     distinct: list[tomtom.RawRoute] = []
@@ -110,7 +119,7 @@ def _find_routes(req: TripRequest, gross_kg: int) -> tuple[list[tomtom.RawRoute]
 
         def via(wp: geo.LatLon) -> list[tomtom.RawRoute]:
             try:
-                return tomtom.calculate_routes([req.origin, wp, req.destination], req.departure, gross_kg)
+                return calculate([req.origin, wp, req.destination], req.departure, gross_kg)
             except tomtom.TomTomError as exc:
                 logger.info("Detour via %s skipped: %s", wp, exc)
                 return []
@@ -187,11 +196,11 @@ def _lookup_count(routes: list[_PreparedRoute]) -> int:
 
 
 def _fetch_checkpoint_weather(
-    routes: list[_PreparedRoute], departure: datetime
+    routes: list[_PreparedRoute], departure: datetime, fetch: Callable[..., list[weather.HourlySeries]]
 ) -> dict[geo.LatLon, weather.HourlySeries]:
     locations = sorted({_loc_key(pos) for r in routes for pos, _ in r.stops.values()})
     latest = max(eta for r in routes for _, eta in r.stops.values())
-    series = weather.fetch_hourly(locations, departure, latest)
+    series = fetch(locations, departure, latest)
     return dict(zip(locations, series, strict=False))
 
 

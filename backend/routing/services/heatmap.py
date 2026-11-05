@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from ..domain.corridor import build_corridor_grid
@@ -14,11 +14,16 @@ HOURS = 48
 MAX_CELLS = 200  # keeps a plan plus its corridor forecast within the free weather tier's minute limit
 
 
-def corridor_heatmap(paths: Sequence[Sequence[LatLon]], departure: datetime, load_lb: float) -> dict:
+def corridor_heatmap(
+    paths: Sequence[Sequence[LatLon]],
+    departure: datetime,
+    load_lb: float,
+    weather_fn: Callable[..., list[weather.HourlySeries]] | None = None,
+) -> dict:
     grid = build_corridor_grid(paths, max_cells=MAX_CELLS)
     start = weather.floor_hour(departure)
     end = start + timedelta(hours=HOURS)
-    series_list = weather.fetch_hourly(grid.centers, start, end)
+    series_list = (weather_fn or weather.fetch_hourly)(grid.centers, start, end)
 
     risk, wind, rain, snow = [], [], [], []
     for series in series_list:

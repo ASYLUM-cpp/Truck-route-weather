@@ -11,7 +11,7 @@ interface ScaleVariable {
   ticks: number[];
   light: RGB;
   dark: RGB;
-  /** Values at or below this are treated as nothing and left transparent. */
+  /** Values at or below this are treated as nothing and left transparent. Below ticks[0] is only tinted. */
   floor: number;
 }
 
@@ -64,10 +64,14 @@ const RISK_RGB = LEVELS.map((l) => hexToRgb(LEVEL_COLOR[l]));
 export function scaleColor(variable: Exclude<HeatVariable, 'risk'>, value: number): [number, number, number, number] {
   const v = SCALE_VARIABLES[variable];
   if (value <= v.floor) return [...v.light, 0];
-  const t = Math.min(1, value / v.max);
-  const k = Math.pow(t, 0.8);
+  const threshold = v.ticks[0];
+  // Below the first risk threshold the weather is Low, so it gets only a faint tint. Otherwise a
+  // 15 mph breeze reads as a storm on the map while every route is correctly rated Low.
+  if (value < threshold) return [...v.light, 0.04 + 0.1 * (value / threshold)];
+  const t = Math.min(1, (value - threshold) / (v.max - threshold));
+  const k = 0.25 + 0.75 * Math.pow(t, 0.8);
   const rgb = v.light.map((c, i) => Math.round(c + (v.dark[i] - c) * k)) as RGB;
-  return [...rgb, 0.2 + 0.62 * Math.pow(t, 0.6)];
+  return [...rgb, 0.38 + 0.5 * Math.pow(t, 0.7)];
 }
 
 function cellColor(variable: HeatVariable, value: number | null): [number, number, number, number] {
